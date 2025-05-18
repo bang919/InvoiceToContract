@@ -4,6 +4,9 @@ const nextConfig = {
   // 为Cloudflare Pages使用静态导出
   output: 'export',
   
+  // 指定静态输出目录
+  distDir: 'out',
+  
   // 为静态导出禁用图像优化
   images: {
     unoptimized: true,
