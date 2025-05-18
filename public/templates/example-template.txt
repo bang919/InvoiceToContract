@@ -1,0 +1,44 @@
+混凝土购销合同
+
+合同编号：{contractNo}
+
+甲方（买方）：{buyerName}
+统一社会信用代码：{buyerTaxID}
+
+乙方（卖方）：{sellerName}
+统一社会信用代码：{sellerTaxID}
+
+项目名称：{projectName}
+项目地址：{projectAddress}
+
+依据《中华人民共和国民法典》及相关法律法规，遵循平等互利和诚实信用的原则，经友好协商，甲乙双方一致同意签订本合同。
+
+第一条 材料名称、品种、规格、数量及价格等约定
+供货表格：
+
+[在Word中插入表格，表头行为"序号 | 名称 | 规格型号 | 数量 | 单位 | 单价 | 金额 | 税率 | 税额"]
+[在第二行中插入以下内容：]
+{#items}{index} | {name} | {spec} | {quantity} | {unit} | {price} | {amount} | {taxRate} | {tax}{/items}
+
+合同金额（不含税）：{totalAmount}元
+金额大写：{amountInWords}
+
+税额合计：{totalTax}元
+税额大写：{taxInWords}
+
+合同总金额（含税）：{totalWithTax}元
+含税金额大写：{totalWithTaxInWords}
+
+第二条 工程材料的质量标准要求：合格。
+
+第六条 付款方式及付款期限:一次性支付全额货款，乙方须提供税率3%的增值税专用发票。
+
+第九条 本合同一式肆份，甲方贰份，乙方贰份，自双方签字盖章之日起生效。复印件以及扫描件均无法律效力。
+
+                      以下无正文
+
+
+甲方：{buyerName}                乙方：{sellerName}
+开户银行：{buyerBank}            开户银行：{sellerBank}
+账号：{buyerBankAccount}         账号：{sellerBankAccount}
+日期：{contractDate}             日期：{contractDate} 

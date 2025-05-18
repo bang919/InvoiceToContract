@@ -1,0 +1,1 @@
+需要将合同模板文件转换为.docx格式才能正常使用。请用Word或LibreOffice打开public/合同模版.doc并另存为DOCX格式。
