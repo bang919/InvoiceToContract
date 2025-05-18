@@ -12,6 +12,10 @@ const nextConfig = {
     unoptimized: true,
   },
   
+  // 忽略api_backup目录
+  pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
+  exclude: ['api_backup/**/*'],
+  
   // 允许处理二进制文件，如 PDF 和 DOC
   webpack: (config, { isServer }) => {
     // 修改文件加载配置，使用 asset/resource 替代 file-loader
