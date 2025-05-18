@@ -4,9 +4,7 @@ const isCloudflare = process.env.CF_PAGES === '1';
 
 const nextConfig = {
   reactStrictMode: true,
-  // 根据环境配置输出方式
-  // 在 Cloudflare 环境中使用 standalone 模式
-  output: isCloudflare ? 'standalone' : undefined,
+  output: 'export', // 强制静态导出
   
   // 允许处理二进制文件，如 PDF 和 DOC
   webpack: (config, { isServer }) => {
