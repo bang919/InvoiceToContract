@@ -29,7 +29,6 @@ export default function RootLayout({
               <nav>
                 <ul className="flex space-x-4">
                   <li><a href="/" className="hover:underline">首页</a></li>
-                  <li><a href="/invoice-to-contract" className="hover:underline">发票转合同</a></li>
                   <li><a href="/template-editor" className="hover:underline">模板编辑指南</a></li>
                 </ul>
               </nav>
