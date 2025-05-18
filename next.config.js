@@ -1,22 +1,22 @@
 /** @type {import('next').NextConfig} */
+// 检测是否在 Cloudflare 环境中运行
+const isCloudflare = process.env.CF_PAGES === '1';
+
 const nextConfig = {
   reactStrictMode: true,
-  // experimental: {
-  //   appDir: true,
-  // },
+  // 根据环境配置输出方式
+  // 在 Cloudflare 环境中使用 standalone 模式
+  output: isCloudflare ? 'standalone' : undefined,
+  
   // 允许处理二进制文件，如 PDF 和 DOC
   webpack: (config, { isServer }) => {
-    // 只有在客户端构建时才包含这些模块
+    // 修改文件加载配置，使用 asset/resource 替代 file-loader
     if (!isServer) {
       config.module.rules.push({
         test: /\.(pdf|doc|docx)$/,
-        use: {
-          loader: 'file-loader',
-          options: {
-            name: '[name].[ext]',
-            publicPath: '/_next/static/files/',
-            outputPath: 'static/files/',
-          },
+        type: 'asset/resource',
+        generator: {
+          filename: 'static/files/[name][ext]',
         },
       });
     }

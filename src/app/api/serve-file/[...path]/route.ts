@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
 import path from 'path';
 import { lookup } from 'mime-types';
+import storageAdapter from '@/utils/storageAdapter';
 
 export async function GET(
   request: NextRequest,
@@ -19,7 +19,10 @@ export async function GET(
     
     // 检查文件是否存在
     try {
-      const stats = await fs.access(fullPath);
+      const fileExists = await storageAdapter.exists(fullPath);
+      if (!fileExists) {
+        throw new Error('File not found');
+      }
       console.log('文件存在, 准备读取');
     } catch (error) {
       console.error('文件不存在:', fullPath, error);
@@ -28,7 +31,7 @@ export async function GET(
     
     // 读取文件
     try {
-      const fileBuffer = await fs.readFile(fullPath);
+      const fileBuffer = await storageAdapter.readFile(fullPath);
       console.log('文件读取成功, 大小:', fileBuffer.length, '字节');
       
       // 根据文件扩展名设置合适的Content-Type
