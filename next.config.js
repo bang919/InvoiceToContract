@@ -4,7 +4,8 @@ const isCloudflare = process.env.CF_PAGES === '1';
 
 const nextConfig = {
   reactStrictMode: true,
-  output: 'export', // 强制静态导出
+  // 对于Cloudflare Pages，我们不使用output配置
+  // 因为Cloudflare需要特殊处理API路由
   
   // 允许处理二进制文件，如 PDF 和 DOC
   webpack: (config, { isServer }) => {
@@ -40,6 +41,8 @@ const nextConfig = {
     return config;
   },
   // 添加静态目录配置
+  // 注意：在Cloudflare Pages环境中，rewrites不会自动工作
+  // 但我们保留它用于本地开发
   async rewrites() {
     return [
       {
