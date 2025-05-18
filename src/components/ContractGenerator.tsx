@@ -5,7 +5,10 @@ import { saveAs } from 'file-saver';
 import * as pdfLib from 'pdf-lib';
 import * as docx from 'docx';
 import JSZip from 'jszip';
-import { extractInvoiceDetails, InvoiceData } from './InvoiceExtractor';
+import PizZip from 'pizzip';
+import Docxtemplater from 'docxtemplater';
+import { extractInvoiceDetails } from './InvoiceExtractor';
+import { extractContractDataFromInvoices } from '../services/ContractService';
 // 删除全局导入
 // import * as pdfjsLib from 'pdfjs-dist';
 
@@ -21,14 +24,47 @@ type ContractGeneratorProps = {
   project: Project;
 };
 
+// 定义发票物品项目接口
+interface InvoiceItem {
+  name: string;
+  spec: string;
+  unit: string;
+  quantity: string;
+  price: string;
+  amount: string;
+  taxRate: string;
+  tax: string;
+}
+
+// 定义自己的InvoiceData接口，避免冲突
+interface LocalInvoiceData {
+  fileName?: string;
+  invoiceNumber?: string;
+  buyer?: string;
+  buyerTaxID?: string;
+  seller?: string;
+  sellerTaxID?: string;
+  sellerBank?: string;
+  sellerBankAccount?: string;
+  amount?: string;
+  project?: string;
+  projectAddress?: string;
+  itemsTable?: string;
+  fullText?: string;
+  content?: string;
+  // 其他可能的字段
+  [key: string]: any;
+}
+
 export default function ContractGenerator({ project }: ContractGeneratorProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const [invoiceDataList, setInvoiceDataList] = useState<InvoiceData[]>([]);
+  const [invoiceDataList, setInvoiceDataList] = useState<LocalInvoiceData[]>([]);
   const [previewData, setPreviewData] = useState<string | null>(null);
   const [templateContent, setTemplateContent] = useState<ArrayBuffer | null>(null);
   const [pdfjs, setPdfjs] = useState<any>(null);
   const [generatedContracts, setGeneratedContracts] = useState<string[]>([]);
   const [isGeneratingContract, setIsGeneratingContract] = useState(false);
+  const [projectNames, setProjectNames] = useState<string[]>([]);
 
   // 动态导入 PDF.js (仅客户端)
   useEffect(() => {
@@ -230,7 +266,7 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
       if (!project.invoices.length || !pdfjs) return;
 
       setIsLoading(true);
-      const processedInvoices: InvoiceData[] = [];
+      const processedInvoices: LocalInvoiceData[] = [];
 
       try {
         for (const invoice of project.invoices) {
@@ -282,8 +318,16 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
             amount: details.amount,
             items: details.items,
             itemsTable: details.itemsTable,
-            fullText: details.fullText,
-            issuer: details.issuer
+            fullText: text,
+            issuer: details.issuer,
+            buyer: details.buyer,
+            buyerTaxID: details.buyerTaxID,
+            seller: details.seller,
+            sellerTaxID: details.sellerTaxID,
+            sellerBank: details.sellerBank,
+            sellerBankAccount: details.sellerBankAccount,
+            project: details.project,
+            projectAddress: details.projectAddress
           });
           
           console.log(`发票 ${invoice.name} 处理完成，添加到结果列表`);
@@ -314,6 +358,11 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
   
   // 生成合同
   const handleGenerateContract = async () => {
+    if (!templateContent) {
+      alert('合同模板尚未加载，请稍后再试');
+      return;
+    }
+    
     if (invoiceDataList.length === 0) {
       alert('请先上传发票');
       return;
@@ -322,27 +371,170 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
     setIsGeneratingContract(true);
     
     try {
-      // 使用API端点生成合同
-      const response = await fetch('/api/generate-contract', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ invoices: invoiceDataList }),
-      });
+      console.log("当前发票列表:", invoiceDataList.map(invoice => ({
+        fileName: invoice.fileName,
+        项目: invoice.project || '未找到',
+        买方: invoice.buyer || '未找到',
+        卖方: invoice.seller || '未找到',
+        项目地址: invoice.projectAddress || '未找到',
+        金额: invoice.amount || '未找到'
+      })));
+
+      // 按项目名称和买卖方信息分组处理发票
+      const groupedInvoices: { [key: string]: LocalInvoiceData[] } = {};
       
-      const result = await response.json();
+      // 对发票按项目和买卖方分组
+      for (const invoice of invoiceDataList) {
+        const project = invoice.project || '';
+        const buyer = invoice.buyer || '';
+        const seller = invoice.seller || '';
+        
+        // 组合键
+        const key = `${project}:${buyer}:${seller}`;
+        
+        if (!groupedInvoices[key]) {
+          groupedInvoices[key] = [];
+        }
+        
+        groupedInvoices[key].push(invoice);
+      }
       
-      if (!response.ok) {
-        throw new Error(result.error || '合同生成失败');
+      // 保存生成的合同URL和对应的项目名称
+      const generatedFiles: string[] = [];
+      const projectNamesList: string[] = [];
+      
+      // 为每个分组生成一份合同
+      for (const [groupKey, invoices] of Object.entries(groupedInvoices)) {
+        // 提取合同数据
+        const contractData = extractDataFromInvoices(invoices);
+        
+        if (!contractData) {
+          console.warn(`无法从分组 ${groupKey} 提取合同数据，跳过该组`);
+          continue;
+        }
+        
+        // 准备模板数据 - 模拟后端处理逻辑
+        const templateData: Record<string, any> = {
+          // 基础信息
+          buyerName: contractData.buyerName || '',
+          sellerName: contractData.sellerName || '',
+          buyerTaxID: contractData.buyerTaxID || '',
+          sellerTaxID: contractData.sellerTaxID || '',
+          projectName: contractData.projectName || '',
+          projectAddress: contractData.projectAddress || '',
+          
+          // 银行信息
+          sellerBank: contractData.sellerBank || '',
+          sellerBankAccount: contractData.sellerBankAccount || '',
+          buyerBank: contractData.buyerBank || '',
+          buyerBankAccount: contractData.buyerBankAccount || '',
+          
+          // 日期和编号
+          contractDate: new Date().toLocaleDateString('zh-CN', {
+            year: 'numeric', 
+            month: '2-digit', 
+            day: '2-digit'
+          }).replace(/\//g, '年').replace(/\//g, '月') + '日',
+          contractNo: `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
+          
+          // 金额信息
+          totalAmount: contractData.totalAmount || '0.00',
+          amountInWords: convertToChineseAmount(contractData.totalAmount || '0'),
+          
+          // 税额信息
+          totalTax: contractData.totalTax || '0.00',
+          taxInWords: convertToChineseAmount(contractData.totalTax || '0'),
+          
+          // 含税总金额
+          totalWithTax: contractData.totalWithTax || '0.00',
+          totalWithTaxInWords: convertToChineseAmount(contractData.totalWithTax || '0'),
+          
+          // 表格数据 - 确保支持遍历
+          items: contractData.invoiceItems?.map((item: InvoiceItem, index: number) => ({
+            index: index + 1,
+            name: item.name || '',
+            spec: item.spec || '',
+            unit: item.unit || '',
+            quantity: item.quantity || '',
+            price: item.price || '',
+            amount: item.amount || '',
+            taxRate: item.taxRate || '',
+            tax: item.tax || ''
+          })) || []
+        };
+        
+        try {
+          // 在渲染模板之前确保所有必要的变量都存在
+          const safeTemplateData = ensureTemplateFields(templateData);
+          console.log("安全的模板数据:", safeTemplateData);
+          
+          // 加载模板内容
+          const buffer = templateContent;
+          const zip = new PizZip(buffer);
+          
+          // 创建docxtemplater实例 (新API)
+          const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: true,
+            delimiters: { start: '{', end: '}' }
+          });
+          
+          // 检查模板变量的格式
+          console.log("模板数据包含以下字段:", Object.keys(safeTemplateData));
+          
+          // 确保items数组存在且格式正确
+          if (safeTemplateData.items && Array.isArray(safeTemplateData.items)) {
+            console.log(`项目列表包含 ${safeTemplateData.items.length} 项，第一项:`, 
+              safeTemplateData.items.length > 0 ? safeTemplateData.items[0] : '无项目');
+          } else {
+            console.warn("项目列表不是数组或为空!");
+          }
+          
+          // 渲染文档
+          doc.render(safeTemplateData);
+          
+          // 生成输出文档
+          const generatedDocument = doc.getZip().generate({
+            type: 'blob',
+            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+          });
+          
+          // 构造文件名（从确定的项目名称）
+          const rawProjectName = contractData.projectName || 'unknown';
+          console.log(`原始项目名称: "${rawProjectName}"`);
+          
+          // 清理项目名称以用作文件名
+          const sanitizedProjectName = rawProjectName
+            .replace(/[\\/:*?"<>|]/g, '_')   // 替换文件名中不允许的字符
+            .replace(/\s+/g, ' ')            // 替换多个空格为单个空格
+            .replace(/^\s+|\s+$/g, '')       // 去除首尾空格
+            .substring(0, 50);                // 限制长度
+          
+          // 添加更多项目名称调试
+          console.log('合同用项目名称:', contractData.projectName);
+          console.log('处理后的项目名称:', sanitizedProjectName);
+          
+          const fileName = `${sanitizedProjectName}-合同.docx`;
+          
+          // 创建URL
+          const url = URL.createObjectURL(generatedDocument);
+          generatedFiles.push(url);
+          projectNamesList.push(sanitizedProjectName);
+          
+          console.log(`成功生成合同: ${sanitizedProjectName}-合同.docx`);
+        } catch (error) {
+          console.error('处理模板失败:', error);
+          throw error;
+        }
       }
       
       // 更新状态
-      setGeneratedContracts(result.files || []);
+      setGeneratedContracts(generatedFiles);
+      setProjectNames(projectNamesList);
       
       // 显示成功信息
-      if (result.files && result.files.length > 0) {
-        alert(`成功生成${result.files.length}个合同文件`);
+      if (generatedFiles.length > 0) {
+        alert(`成功生成${generatedFiles.length}个合同文件`);
       } else {
         alert('没有生成任何合同文件，请检查发票数据');
       }
@@ -355,30 +547,504 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
   };
   
   // 下载生成的合同
-  const handleDownloadContract = (filePath: string) => {
-    // 构建完整的URL
-    const fullUrl = window.location.origin + filePath;
-    console.log('尝试下载文件:', fullUrl);
-    
-    // 使用fetch获取文件并下载
-    fetch(fullUrl)
-      .then(response => {
-        if (!response.ok) {
-          throw new Error(`下载失败: ${response.status} ${response.statusText}`);
-        }
-        return response.blob();
-      })
-      .then(blob => {
-        // 使用file-saver库保存文件
-        const fileName = filePath.split('/').pop() || 'contract.docx';
-        saveAs(blob, fileName);
-      })
-      .catch(error => {
-        console.error('下载合同失败:', error);
-        alert(`下载合同失败: ${error.message}`);
-      });
+  const handleDownloadContract = (blobUrl: string) => {
+    try {
+      // 从generatedContracts状态中提取对应的文件名
+      const index = generatedContracts.findIndex(url => url === blobUrl);
+      const fileName = index >= 0 && projectNames[index] 
+        ? `${projectNames[index]}-合同.docx` 
+        : 'contract.docx';
+      
+      console.log('准备下载文件:', fileName);
+      
+      // 获取Blob对象
+      fetch(blobUrl)
+        .then(response => response.blob())
+        .then(blob => {
+          // 使用file-saver库保存文件
+          saveAs(blob, fileName);
+        })
+        .catch(error => {
+          console.error('下载合同失败:', error);
+          alert(`下载合同失败: ${error.message}`);
+        });
+    } catch (error: any) {
+      console.error('下载合同失败:', error);
+      alert(`下载合同失败: ${error.message}`);
+    }
   };
   
+  // 自定义项目名称提取函数
+  const extractProjectName = (content: string, fullText: string): string => {
+    // 常见项目标记
+    const projectKeys = ['项目/工程', '项目名称', '工程名称', '工程项目'];
+    let projectName = '';
+    
+    // 1. 直接在文本中寻找明显的项目行
+    if (content) {
+      // 查找包含以上关键字的行
+      for (const key of projectKeys) {
+        const lines = content.split('\n').filter(line => line.includes(key));
+        if (lines.length > 0) {
+          const parts = lines[0].split(/[：:]/);
+          if (parts.length > 1) {
+            projectName = parts[1].trim();
+            console.log(`从内容中提取项目名称 (关键字 ${key}): "${projectName}"`);
+            if (projectName) return projectName;
+          }
+        }
+      }
+    }
+    
+    // 2. 尝试从全文中提取
+    if (fullText) {
+      for (const key of projectKeys) {
+        const regex = new RegExp(`${key}[：:](.*?)(?=\\n|$)`, 'i');
+        const match = fullText.match(regex);
+        if (match && match[1]) {
+          projectName = match[1].trim();
+          console.log(`使用正则从全文中提取项目名称 (关键字 ${key}): "${projectName}"`);
+          if (projectName) return projectName;
+        }
+      }
+      
+      // 3. 尝试查找包含"项目"或"工程"的行
+      const projectLines = fullText.split('\n').filter(line => 
+        line.includes('项目') || line.includes('工程')
+      );
+      
+      if (projectLines.length > 0) {
+        for (const line of projectLines) {
+          if (line.includes('：') || line.includes(':')) {
+            const parts = line.split(/[：:]/);
+            if (parts.length > 1) {
+              projectName = parts[1].trim();
+              console.log(`从全文的项目行中提取项目名称: "${projectName}"`);
+              if (projectName) return projectName;
+            }
+          }
+        }
+      }
+    }
+    
+    // 如果上述方法都失败，尝试在发票内容中寻找可能的项目信息
+    if (content) {
+      const contentLines = content.split('\n');
+      // 查找包含"项目"但不在冒号前面的行
+      for (const line of contentLines) {
+        if ((line.includes('项目') || line.includes('工程')) && 
+            !line.match(/^[^：:]*项目[^：:]*[:：]/)) {
+          console.log(`找到可能的项目行: "${line}"`);
+          return line.trim();
+        }
+      }
+    }
+    
+    return '未知项目';
+  };
+
+  // 修改extractDataFromInvoices函数，增加更多安全检查
+  const extractDataFromInvoices = (invoices: LocalInvoiceData[]) => {
+    if (!invoices || invoices.length === 0) {
+      console.warn('没有提供有效的发票数据');
+      return null;
+    }
+
+    console.log('开始处理发票数据，共', invoices.length, '张发票');
+    
+    // 从发票全文中提取关键信息
+    const extractField = (fieldName: string, text: string | undefined): string => {
+      if (!text) return '';
+      
+      try {
+        // 针对不同字段使用更精确的正则表达式
+        const regex = new RegExp(`${fieldName}[：:]\\s*([^\\n]+)`, 'i');
+        const match = text.match(regex);
+        
+        if (match && match[1]) {
+          const result = match[1].trim();
+          console.log(`成功提取字段 "${fieldName}": "${result}"`);
+          return result;
+        }
+        
+        // 尝试更宽松的匹配
+        const looseRegex = new RegExp(`${fieldName}.*?[：:]\\s*([^\\n]+)`, 'i');
+        const looseMatch = text.match(looseRegex);
+        
+        if (looseMatch && looseMatch[1]) {
+          const result = looseMatch[1].trim();
+          console.log(`使用宽松匹配成功提取字段 "${fieldName}": "${result}"`);
+          return result;
+        }
+        
+        console.log(`未能提取字段 "${fieldName}"`);
+        return '';
+      } catch (error) {
+        console.warn(`提取字段 ${fieldName} 时出错:`, error);
+        return '';
+      }
+    };
+    
+    // 初始化合同数据
+    const contractData: any = {
+      buyerName: '',
+      buyerTaxID: '',
+      sellerName: '',
+      sellerTaxID: '',
+      sellerBank: '',
+      sellerBankAccount: '',
+      projectName: '',
+      projectAddress: '',
+      invoiceItems: [],
+      totalAmount: '0.00',
+      totalTax: '0.00',
+      totalWithTax: '0.00'
+    };
+    
+    // 累计金额
+    let totalAmount = 0;
+    let totalTax = 0;
+    
+    // 处理每张发票
+    for (const invoice of invoices) {
+      if (!invoice) {
+        console.warn('跳过无效发票');
+        continue;
+      }
+      
+      // 确保这些值不是undefined
+      const fullText = invoice.fullText || '';
+      const content = invoice.content || '';
+      
+      console.log('处理发票:', {
+        发票名称: invoice.fileName || '未知',
+        发票号码: invoice.invoiceNumber || '未知',
+        买方: invoice.buyer || '未知',
+        卖方: invoice.seller || '未知',
+        项目: invoice.project || '未知',
+        金额: invoice.amount || '未知',
+        有全文: !!fullText,
+        全文长度: fullText.length,
+        有内容: !!content,
+        内容长度: content.length
+      });
+      
+      try {
+        // 更新买方信息 (优先使用之前提取的)
+        if (!contractData.buyerName) {
+          contractData.buyerName = invoice.buyer || extractField('购买方', fullText);
+        }
+        
+        if (!contractData.buyerTaxID) {
+          contractData.buyerTaxID = invoice.buyerTaxID || extractField('购买方.*?税号', fullText);
+        }
+        
+        // 更新卖方信息
+        if (!contractData.sellerName) {
+          contractData.sellerName = invoice.seller || extractField('销售方', fullText);
+        }
+        
+        if (!contractData.sellerTaxID) {
+          contractData.sellerTaxID = invoice.sellerTaxID || extractField('销售方.*?税号', fullText);
+        }
+        
+        // 提取银行信息
+        if (!contractData.sellerBank) {
+          contractData.sellerBank = invoice.sellerBank || extractField('销售方.*?开户行', fullText);
+        }
+        
+        if (!contractData.sellerBankAccount) {
+          contractData.sellerBankAccount = invoice.sellerBankAccount || extractField('销售方.*?账号', fullText);
+        }
+        
+        // 提取项目信息
+        if (!contractData.projectName) {
+          // 首先检查invoice对象中的project字段
+          if (invoice.project) {
+            contractData.projectName = invoice.project;
+            console.log(`使用invoice对象的项目名称: "${contractData.projectName}"`);
+          } else {
+            // 使用自定义提取函数
+            contractData.projectName = extractProjectName(content, fullText);
+            console.log(`提取到的项目名称: "${contractData.projectName}"`);
+          }
+        }
+        
+        if (!contractData.projectAddress) {
+          contractData.projectAddress = invoice.projectAddress || extractField('地址|工程地址', fullText);
+        }
+        
+        // 处理发票项目
+        if (invoice.itemsTable) {
+          try {
+            // 处理表格
+            const rows = invoice.itemsTable.trim().split('\n').filter(row => row.trim());
+            
+            if (rows.length > 1) { // 至少有表头和一行数据
+              const headers = rows[0].split('\t');
+              const dataRows = rows.slice(1);
+              
+              // 找到相关列的索引
+              const nameIndex = headers.findIndex((h: string) => h.includes('名称'));
+              const specIndex = headers.findIndex((h: string) => h.includes('规格') || h.includes('型号'));
+              const unitIndex = headers.findIndex((h: string) => h.includes('单位'));
+              const quantityIndex = headers.findIndex((h: string) => h.includes('数量'));
+              const priceIndex = headers.findIndex((h: string) => h.includes('单价'));
+              const amountIndex = headers.findIndex((h: string) => h.includes('金额'));
+              const taxRateIndex = headers.findIndex((h: string) => h.includes('税率'));
+              const taxIndex = headers.findIndex((h: string) => h.includes('税额'));
+              
+              console.log('表格列映射:', {
+                名称列: nameIndex,
+                规格列: specIndex,
+                单位列: unitIndex,
+                数量列: quantityIndex,
+                单价列: priceIndex,
+                金额列: amountIndex,
+                税率列: taxRateIndex,
+                税额列: taxIndex
+              });
+              
+              // 解析每一行数据
+              for (const row of dataRows) {
+                const cells = row.split('\t');
+                
+                // 跳过汇总行 - 检查名称或者序号列
+                const name = nameIndex >= 0 ? cells[nameIndex] : '';
+                const isHeaderOrSummary = 
+                  !name || 
+                  name.includes('合计') || 
+                  name.includes('价税合计') || 
+                  name.includes('不含税金额') ||
+                  name.includes('价税合');
+                
+                if (isHeaderOrSummary) {
+                  console.log(`跳过汇总行: ${row}`);
+                  continue;
+                }
+                
+                // 创建商品项
+                const item: InvoiceItem = {
+                  name: nameIndex >= 0 && cells[nameIndex] ? cells[nameIndex].trim() : '',
+                  spec: specIndex >= 0 && cells[specIndex] ? cells[specIndex].trim() : '',
+                  unit: unitIndex >= 0 && cells[unitIndex] ? cells[unitIndex].trim() : '',
+                  quantity: quantityIndex >= 0 && cells[quantityIndex] ? cells[quantityIndex].trim() : '',
+                  price: priceIndex >= 0 && cells[priceIndex] ? cells[priceIndex].trim() : '',
+                  amount: amountIndex >= 0 && cells[amountIndex] ? cells[amountIndex].trim() : '',
+                  taxRate: taxRateIndex >= 0 && cells[taxRateIndex] ? cells[taxRateIndex].trim() : '',
+                  tax: taxIndex >= 0 && cells[taxIndex] ? cells[taxIndex].trim() : ''
+                };
+                
+                // 计算项目金额和税额
+                if (item.amount) {
+                  try {
+                    const amount = parseFloat(item.amount.replace(/[^\d.-]/g, '')) || 0;
+                    totalAmount += amount;
+                    
+                    // 计算税额 - 直接使用税额列
+                    if (item.tax) {
+                      const tax = parseFloat(item.tax.replace(/[^\d.-]/g, '')) || 0;
+                      totalTax += tax;
+                    } 
+                    // 如果没有税额列但有税率列，从金额和税率计算
+                    else if (item.taxRate) {
+                      let taxRate = 0;
+                      const taxRateStr = item.taxRate.replace(/[^\d.%]/g, '');
+                      
+                      if (taxRateStr.includes('%')) {
+                        taxRate = parseFloat(taxRateStr) / 100;
+                      } else {
+                        taxRate = parseFloat(taxRateStr);
+                        // 如果税率看起来不是百分比格式(>1)，则假设它已经是小数
+                        if (taxRate > 1) {
+                          taxRate = taxRate / 100;
+                        }
+                      }
+                      
+                      const tax = amount * taxRate;
+                      totalTax += tax;
+                      item.tax = tax.toFixed(2); // 更新项目税额
+                    }
+                  } catch (e) {
+                    console.warn('解析金额或税额失败:', e);
+                  }
+                }
+                
+                // 添加到商品列表
+                contractData.invoiceItems.push(item);
+              }
+            }
+          } catch (e) {
+            console.error('处理商品表格失败:', e);
+          }
+        }
+      } catch (error) {
+        console.error('处理发票过程中发生错误:', error);
+        // 继续处理下一张发票
+      }
+    }
+    
+    // 处理完所有发票后，更新合同数据中的金额
+    contractData.totalAmount = totalAmount.toFixed(2);
+    contractData.totalTax = totalTax.toFixed(2);
+    // 含税总额 = 总金额 + 总税额
+    contractData.totalWithTax = (totalAmount + totalTax).toFixed(2);
+
+    console.log('计算的金额：', {
+      不含税总额: contractData.totalAmount,
+      税额: contractData.totalTax,
+      含税总额: contractData.totalWithTax
+    });
+    
+    console.log('提取的合同数据:', contractData);
+    
+    // 检查是否有必要的数据
+    if (!contractData.buyerName || !contractData.sellerName || contractData.invoiceItems.length === 0) {
+      console.warn('关键合同数据缺失');
+      return contractData; // 仍然返回数据，由调用者决定如何处理
+    }
+    
+    return contractData;
+  };
+  
+  // 数字金额转中文大写
+  const convertToChineseAmount = (amount: string | number): string => {
+    // 确保输入为数字
+    const num = typeof amount === 'string' 
+      ? parseFloat(amount.replace(/[^\d.]/g, '')) 
+      : amount;
+
+    if (isNaN(num) || num === 0) {
+      return '零元整';
+    }
+
+    const fraction = ['角', '分'];
+    const digit = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖'];
+    const unit = [
+      ['元', '万', '亿'],
+      ['', '拾', '佰', '仟']
+    ];
+
+    // 处理小数点之后的小数部分
+    let head = Math.floor(num);
+    let tail = '';
+    const numStr = num.toString();
+    const dotIndex = numStr.indexOf('.');
+    
+    if (dotIndex !== -1) {
+      const cents = numStr.substring(dotIndex + 1);
+      if (cents.length > 0) {
+        // 处理小数，只取前两位
+        for (let i = 0; i < Math.min(2, cents.length); i++) {
+          if (cents[i] !== '0') {
+            tail += digit[parseInt(cents[i])] + fraction[i];
+          }
+        }
+      }
+    }
+
+    // 处理整数部分
+    let headText = '';
+    let i = 0;
+    
+    // 将整数部分转换为 4 位分组，从个位开始计算
+    while (head > 0) {
+      let p = '';
+      // 处理每组的 4 位数
+      for (let j = 0; j < 4; j++) {
+        // 当前位的值
+        const digit_value = head % 10;
+        // 减掉这一位
+        head = Math.floor(head / 10);
+        
+        // 处理每一位
+        if (digit_value !== 0) {
+          // 数字 + 单位（佰，拾等）
+          p = digit[digit_value] + unit[1][j] + p;
+        } else {
+          // 使用"零"占位，但不连续使用"零"
+          if (j === 0) {
+            // skip
+          } else if (p.charAt(0) !== '零') {
+            p = '零' + p;
+          }
+        }
+      }
+      
+      // 加上万亿等单位
+      if (p !== '') {
+        headText = p + unit[0][i] + headText;
+      }
+      
+      i++;
+    }
+
+    // 整数部分为 0 时特殊处理
+    if (headText === '') {
+      headText = '零元';
+    }
+    
+    // 如果没有小数部分，增加"整"字
+    if (tail === '') {
+      tail = '整';
+    }
+
+    return headText + tail;
+  };
+
+  // 在渲染模板之前确保所有必要的变量都存在
+  // 添加此检查到handleGenerateContract函数中处理模板数据的部分
+  // 确保所有必要的模板字段都有值
+  const ensureTemplateFields = (data: Record<string, any>): Record<string, any> => {
+    // 检查example-template.txt中的所有必需字段
+    const requiredFields = [
+      'contractNo', 'buyerName', 'buyerTaxID', 'sellerName', 'sellerTaxID',
+      'projectName', 'projectAddress', 'totalAmount', 'amountInWords',
+      'totalTax', 'taxInWords', 'totalWithTax', 'totalWithTaxInWords',
+      'buyerBank', 'buyerBankAccount', 'sellerBank', 'sellerBankAccount',
+      'contractDate', 'items'
+    ];
+    
+    const result = { ...data };
+    
+    // 确保所有字段都存在
+    for (const field of requiredFields) {
+      if (!result[field] || result[field] === '') {
+        if (field === 'items' && (!result[field] || !Array.isArray(result[field]))) {
+          result[field] = [];
+          console.warn(`模板字段 "${field}" 不是数组，设为空数组`);
+        } else {
+          result[field] = field.includes('Date') ? new Date().toLocaleDateString() : '未提供';
+          console.warn(`模板字段 "${field}" 缺失，使用默认值`);
+        }
+      }
+    }
+    
+    // 确保项目名称非空
+    if (!result.projectName || result.projectName === '未知项目' || result.projectName === '未提供') {
+      result.projectName = `合同-${new Date().toISOString().slice(0, 10)}`;
+      console.log(`使用日期作为项目名称: "${result.projectName}"`);
+    }
+    
+    // 确保items数组每一项都有必要的属性
+    if (Array.isArray(result.items)) {
+      result.items = result.items.map((item, index) => {
+        const safeItem = { ...item };
+        const itemFields = ['index', 'name', 'spec', 'unit', 'quantity', 'price', 'amount', 'taxRate', 'tax'];
+        
+        for (const field of itemFields) {
+          if (!safeItem[field]) {
+            safeItem[field] = field === 'index' ? (index + 1) : '';
+          }
+        }
+        
+        return safeItem;
+      });
+    }
+    
+    return result;
+  };
+
   // 增加发票详细显示，只显示不生成合同
   const renderInvoiceDetails = () => {
     if (!invoiceDataList.length) {
@@ -575,7 +1241,7 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
             <ul className="space-y-2">
               {generatedContracts.map((contract, index) => (
                 <li key={index} className="bg-gray-50 p-3 rounded flex justify-between items-center">
-                  <span>{contract.split('/').pop()}</span>
+                  <span>{projectNames[index] ? `${projectNames[index]}-合同.docx` : '未知项目合同.docx'}</span>
                   <button
                     onClick={() => handleDownloadContract(contract)}
                     className="px-3 py-1 bg-green-600 text-white rounded-md text-sm hover:bg-green-700"
