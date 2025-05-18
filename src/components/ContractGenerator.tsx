@@ -52,20 +52,13 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
     const loadTemplate = async () => {
       console.log('开始加载合同模板...');
       try {
-        // 尝试直接从相对路径获取
-        let response = await fetch('/合同模版.docx');
+        // 尝试从公共目录加载Word模板
+        let response = await fetch('/contract-template.docx');
         
-        // 如果第一次获取失败，尝试其他可能的路径
         if (!response.ok) {
-          console.log('首次加载失败，尝试备用路径...');
-          // 尝试使用绝对路径
-          response = await fetch('/public/合同模版.docx');
-        }
-        
-        // 如果仍然失败，尝试通过API获取
-        if (!response.ok) {
-          console.log('备用路径加载失败，尝试通过API获取...');
-          response = await fetch('/api/get-template');
+          console.warn('无法从根路径加载模板，尝试从public目录加载');
+          // 尝试从public目录加载
+          response = await fetch('/public/contract-template.docx');
         }
         
         if (!response.ok) {

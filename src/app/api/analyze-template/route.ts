@@ -4,8 +4,8 @@ import { analyzeTemplate } from '../../../services/ContractService';
 
 export async function GET(request: NextRequest) {
   try {
-    // 获取模板路径
-    const templatePath = path.join(process.cwd(), 'public', '合同模版.docx');
+    // 获取模板文件路径
+    const templatePath = path.join(process.cwd(), 'public', 'contract-template.docx');
     
     // 分析模板
     const result = await analyzeTemplate(templatePath);

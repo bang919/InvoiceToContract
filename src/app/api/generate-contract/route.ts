@@ -68,7 +68,7 @@ export async function POST(request: NextRequest) {
     console.log(`准备为 ${invoices.length} 份发票生成合同`);
     
     // 获取合同模板路径
-    const templatePath = path.join(process.cwd(), 'public', '合同模版.docx');
+    const templatePath = path.join(process.cwd(), 'public', 'contract-template.docx');
     if (!fs.existsSync(templatePath)) {
       console.error('合同模板文件不存在:', templatePath);
       return NextResponse.json({ 

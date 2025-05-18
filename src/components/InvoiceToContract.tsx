@@ -15,7 +15,7 @@ export default function InvoiceToContract() {
     const analyzeTemplate = async () => {
       try {
         // 从public目录加载模板
-        const templateRes = await fetch("/合同模版.docx");
+        const templateRes = await fetch("/contract-template.docx");
         const templateBuffer = await templateRes.arrayBuffer();
         
         // 将二进制数据转换为文本（这只能获取部分可读内容）
