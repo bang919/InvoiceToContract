@@ -8,6 +8,8 @@ export default function InvoiceToContract() {
   const [invoiceData, setInvoiceData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [templateContent, setTemplateContent] = useState<string>("");
+  const [contractBuffer, setContractBuffer] = useState<Uint8Array | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 加载并分析模板
@@ -33,6 +35,7 @@ export default function InvoiceToContract() {
         setTemplateContent(`找到可能的变量标记: ${Array.from(variables).join(", ") || "未找到变量标记"}\n\n模板部分内容预览：\n${text.substring(0, 500)}...`);
       } catch (error) {
         console.error("分析模板出错:", error);
+        setError("无法分析模板，可能格式不兼容。请手动查看模板文件，确定变量标记。");
         setTemplateContent("无法分析模板，可能格式不兼容。请手动查看模板文件，确定变量标记。");
       }
     };
@@ -43,6 +46,7 @@ export default function InvoiceToContract() {
   // 1. 解析PDF发票
   const parseInvoicePDF = async (file: File) => {
     setLoading(true);
+    setError(null);
     try {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await PDFDocument.load(arrayBuffer);
@@ -111,25 +115,32 @@ export default function InvoiceToContract() {
       };
       
       setInvoiceData(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error("解析PDF出错:", error);
-      alert("解析PDF发票失败，请检查文件格式。");
+      setError(`解析PDF发票失败: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  // 2. 生成合同DOCX
+  // 2. 生成合同DOCX - 完全在客户端处理
   const generateContract = async () => {
-    if (!invoiceData) return;
+    if (!invoiceData) {
+      setError("没有可用的发票数据");
+      return;
+    }
     
     setLoading(true);
+    setError(null);
     
     try {
       // 从public目录加载模板
-      const templateRes = await fetch("/templates/contract-template.docx");
+      const templateRes = await fetch("/contract-template.docx");
+      if (!templateRes.ok) {
+        throw new Error(`无法加载模板: ${templateRes.status} ${templateRes.statusText}`);
+      }
+      
       const templateBuffer = await templateRes.arrayBuffer();
-
       console.log("模板加载成功，大小:", templateBuffer.byteLength, "字节");
 
       // 准备数据
@@ -198,14 +209,14 @@ export default function InvoiceToContract() {
         throw new Error("所有分隔符选项都失败，无法生成合同文档");
       }
       
-      // 保存为文件
-      const blob = new Blob([docBuffer], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-      saveAs(blob, `合同_${invoiceData.projectName || '未命名'}_${year}${month}${day}.docx`);
-      console.log(`合同已生成，使用了 ${successOption?.desc || '未知'} 选项`);
+      // 存储在内存中，不立即下载
+      setContractBuffer(docBuffer);
+      
+      console.log(`合同已生成并保存在内存中，使用了 ${successOption?.desc || '未知'} 选项`);
       
     } catch (error: any) {
       console.error("生成合同失败:", error);
-      alert(`生成合同失败: ${error.message}`);
+      setError(`生成合同失败: ${error.message}`);
     } finally {
       setLoading(false);
     }
@@ -220,90 +231,29 @@ export default function InvoiceToContract() {
     await parseInvoicePDF(files[0]);
   };
 
-  // 4. 调用服务器API处理发票
-  const handleServerProcessing = async () => {
-    if (!fileInputRef.current?.files?.length) {
-      alert("请先选择发票文件");
+  // 下载生成的合同
+  const downloadGeneratedContract = () => {
+    if (!contractBuffer) {
+      setError("没有可用的合同文档");
       return;
     }
     
-    setLoading(true);
-    
     try {
-      const formData = new FormData();
-      Array.from(fileInputRef.current.files).forEach((file, index) => {
-        formData.append(`invoice${index}`, file);
+      // 创建Blob对象
+      const blob = new Blob([contractBuffer], { 
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' 
       });
       
-      const response = await fetch('/api/extract-invoice', {
-        method: 'POST',
-        body: formData
-      });
+      // 生成文件名
+      const fileName = `合同_${invoiceData?.projectName || '未命名'}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.docx`;
       
-      if (!response.ok) {
-        throw new Error(`服务器处理失败: ${response.status} ${response.statusText}`);
-      }
+      // 保存文件
+      saveAs(blob, fileName);
       
-      const data = await response.json();
-      if (data.success) {
-        setInvoiceData(data.invoiceData);
-        console.log("从服务器获取的发票数据:", data.invoiceData);
-      } else {
-        throw new Error(data.error || "处理发票时出错");
-      }
+      console.log("合同已下载:", fileName);
     } catch (error: any) {
-      console.error("服务器处理发票出错:", error);
-      alert(`处理发票失败: ${error.message}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 5. 调用服务器API生成合同
-  const handleServerGeneration = async () => {
-    if (!invoiceData) {
-      alert("没有可用的发票数据");
-      return;
-    }
-    
-    setLoading(true);
-    
-    try {
-      const response = await fetch('/api/generate-contract', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          invoices: [invoiceData]
-        })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`服务器处理失败: ${response.status} ${response.statusText}`);
-      }
-      
-      const data = await response.json();
-      if (data.success && data.files && data.files.length > 0) {
-        // 下载生成的文件
-        for (const fileUrl of data.files) {
-          // 创建下载链接并点击
-          const link = document.createElement('a');
-          link.href = fileUrl;
-          link.download = fileUrl.split('/').pop() || '合同.docx';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          console.log("已下载文件:", fileUrl);
-        }
-      } else {
-        throw new Error(data.error || "生成合同时出错");
-      }
-    } catch (error: any) {
-      console.error("服务器生成合同出错:", error);
-      alert(`生成合同失败: ${error.message}`);
-    } finally {
-      setLoading(false);
+      console.error("下载合同失败:", error);
+      setError(`下载合同失败: ${error.message}`);
     }
   };
 
@@ -391,40 +341,15 @@ export default function InvoiceToContract() {
     return headText + tail;
   };
 
-  // 下载合同（从服务器获取）
-  const downloadContract = async (contractPath: string) => {
-    try {
-      // 创建服务器端合同下载请求
-      const response = await fetch(`/api/download?path=${encodeURIComponent(contractPath)}`);
-      
-      if (!response.ok) {
-        throw new Error(`下载失败: ${response.status} ${response.statusText}`);
-      }
-      
-      // 获取文件blob
-      const blob = await response.blob();
-      
-      // 创建下载链接
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = contractPath.split('/').pop() || 'contract.docx';
-      
-      // 模拟点击下载
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      
-      // 释放URL对象
-      URL.revokeObjectURL(link.href);
-    } catch (error: any) {
-      console.error("下载合同失败:", error);
-      alert(`下载失败: ${error.message}`);
-    }
-  };
-
   return (
     <div className="max-w-4xl mx-auto p-4">
       <h1 className="text-2xl font-bold mb-4">发票转合同工具</h1>
+      
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 text-red-700 rounded-lg border border-red-300">
+          {error}
+        </div>
+      )}
       
       <div className="mb-6 p-4 bg-gray-100 rounded-lg">
         <h2 className="text-xl font-semibold mb-2">步骤1: 上传发票</h2>
@@ -436,13 +361,6 @@ export default function InvoiceToContract() {
             accept=".pdf"
             className="p-2 border rounded"
           />
-          <button 
-            onClick={handleServerProcessing}
-            disabled={loading}
-            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:bg-gray-400"
-          >
-            {loading ? "处理中..." : "处理发票"}
-          </button>
         </div>
       </div>
       
@@ -458,13 +376,24 @@ export default function InvoiceToContract() {
             <div><strong>总金额:</strong> {invoiceData.totalAmount}</div>
           </div>
           
-          <button 
-            onClick={handleServerGeneration}
-            disabled={loading}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400"
-          >
-            {loading ? "生成中..." : "生成合同"}
-          </button>
+          <div className="flex gap-4">
+            <button 
+              onClick={generateContract}
+              disabled={loading}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-400"
+            >
+              {loading ? "生成中..." : "生成合同"}
+            </button>
+            
+            {contractBuffer && (
+              <button 
+                onClick={downloadGeneratedContract}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+              >
+                下载合同
+              </button>
+            )}
+          </div>
         </div>
       )}
       
