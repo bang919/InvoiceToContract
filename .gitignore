@@ -35,3 +35,5 @@ next-env.d.ts
 # contract output files
 /output/
 /public/contracts/ 
+# build
+.next/
