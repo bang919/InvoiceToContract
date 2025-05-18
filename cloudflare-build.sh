@@ -7,13 +7,22 @@ set -ex
 echo "使用Cloudflare特定的Next.js配置..."
 cp next.config.cloudflare.js next.config.js
 
-# 临时备份API目录，因为API路由不能用于静态导出
-echo "临时移除API目录以支持静态导出..."
+# 彻底处理API目录，确保没有动态路由出现在构建过程中
+echo "完全移除API目录以支持静态导出..."
 if [ -d "src/app/api" ]; then
-  mkdir -p src/app/api_backup
-  mv src/app/api/* src/app/api_backup/
-  # 确保API目录存在但为空
-  mkdir -p src/app/api
+  # 创建API备份目录
+  mkdir -p /tmp/api_backup
+  
+  # 复制API内容到临时目录（而不是项目内的目录）
+  cp -r src/app/api/* /tmp/api_backup/
+  
+  # 完全删除API目录
+  rm -rf src/app/api
+  
+  # 确保API目录不存在
+  if [ -d "src/app/api_backup" ]; then
+    rm -rf src/app/api_backup
+  fi
 fi
 
 # 运行静态导出构建
@@ -22,11 +31,10 @@ npm run build
 
 # 恢复API目录
 echo "恢复API目录..."
-if [ -d "src/app/api_backup" ]; then
-  rm -rf src/app/api
+if [ -d "/tmp/api_backup" ]; then
   mkdir -p src/app/api
-  mv src/app/api_backup/* src/app/api/
-  rm -rf src/app/api_backup
+  cp -r /tmp/api_backup/* src/app/api/
+  rm -rf /tmp/api_backup
 fi
 
 # 构建完成后，删除不必要的缓存文件以减小部署大小

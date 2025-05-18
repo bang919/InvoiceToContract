@@ -12,9 +12,8 @@ const nextConfig = {
     unoptimized: true,
   },
   
-  // 忽略api_backup目录
+  // 仅包含特定页面扩展名
   pageExtensions: ['tsx', 'ts', 'jsx', 'js'],
-  exclude: ['api_backup/**/*'],
   
   // 允许处理二进制文件，如 PDF 和 DOC
   webpack: (config, { isServer }) => {
