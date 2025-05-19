@@ -46,14 +46,13 @@ interface LocalInvoiceData {
   sellerTaxID?: string;
   sellerBank?: string;
   sellerBankAccount?: string;
-  amount?: string;
   project?: string;
   projectAddress?: string;
-  itemsTable?: string;
+  date?: string;
+  itemsTable?: InvoiceItem[];
   fullText?: string;
   content?: string;
-  // 其他可能的字段
-  [key: string]: any;
+  issuer?: string;
 }
 
 export default function ContractGenerator({ project }: ContractGeneratorProps) {
@@ -113,10 +112,10 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
     loadTemplate();
   }, []);
 
-  // 从PDF中提取文本 - 优化文本提取顺序
-  const extractTextFromPDF = async (file: File): Promise<{text: string, textItems: any[]}> => {
+  // 从PDF中提取文本 - 优化文本提取顺序，text是所有文本，textItems是带坐标文本
+  const extractTextFromPDF = async (file: File): Promise<{text: string}> => {
     if (!pdfjs) {
-      return {text: `[PDF处理库尚未加载]`, textItems: []};
+      return {text: `[PDF处理库尚未加载]`};
     }
     
     try {
@@ -163,16 +162,10 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           }
         });
         
-        console.log(`第${i}页有效文本项数量: ${pageTextItems.length}`);
-        if (pageTextItems.length > 0) {
-          console.log(`第${i}页前5个文本项示例:`, 
-            pageTextItems.slice(0, 5).map(item => `"${item.text}"(x:${item.x},y:${item.y})`).join(', '));
-        }
-        
         // 按行分组（基于Y坐标，允许小误差）
         const yTolerance = 5; // Y坐标容差
-        const rows: any[] = [];
-        let currentRow: any[] = [];
+        const rows: any[] = [];//带有坐标
+        let currentRow: any[] = [];//带有坐标
         
         // 按Y坐标排序
         pageTextItems.sort((a, b) => a.y - b.y);
@@ -209,31 +202,103 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
         
         // 遍历所有行
         for (let j = 0; j < rows.length; j++) {
-          const row = rows[j];
-          const rowText = row.map((item: any) => item.text).join(' ');
+          if(j >= rows.length){//可能已经被删了几行
+            break;
+          }
+          let row = rows[j];
+          let rowText = row.map((item: any) => item.text).join(' ');
+
+          console.log(`第${i}页第【${j+1}】行文本: ${rowText}`);
           
           // 检测是否进入商品明细区域
-          if (rowText.includes('项目名称') && rowText.includes('规格型号') && rowText.includes('单位') && rowText.includes('数量')) {
+          if (rowText.includes('项目名称') && rowText.includes('规格型号')) {
             isInItemsSection = true;
             itemsText += '【商品明细开始】\n';
             itemsText += rowText + '\n';
-            console.log(`第${i}页第${j+1}行识别为商品明细表头: ${rowText}`);
+            console.log(`------------第${i}页第${j+1}行识别为商品明细表头: ${rowText}`);
             continue;
           }
           
           // 检测是否离开商品明细区域
-          if (isInItemsSection && (rowText.includes('合计') || rowText.includes('价税合计'))) {
+          if (isInItemsSection && (rowText.includes('合 计 ¥'))) {
             itemsText += rowText + '\n';
             itemsText += '【商品明细结束】\n';
             isInItemsSection = false;
-            console.log(`第${i}页第${j+1}行识别为商品明细结束: ${rowText}`);
+            console.log(`------------第${i}页第${j+1}行识别为商品明细结束: ${rowText}`);
             continue;
           }
           
           // 处理商品明细区域内的行
           if (isInItemsSection) {
+            //重点！！！归类row：如果x坐标小于100，则属于项目名称，都合并在一起；如果x坐标大于100小于160，则属于规格型号(有可能为空，则给赋值""，都合并在一起。组成新的row
+            {
+              let projectName = '';
+              let specification = '';
+              let unit = '';
+              // 归类项目名称 (x < 100)
+              const projectNameItems = row.filter((item: any) => item.x < 100);
+              if (projectNameItems.length > 0) {
+                projectName = projectNameItems.map((_item: { text: any; }) => _item.text).join('');
+              }
+              // 归类规格型号 (100 < x < 160)
+              const specificationItems = row.filter((item: any) => item.x >= 100 && item.x < 160);
+              if (specificationItems.length > 0) {
+                specification = specificationItems.map((_item: { text: any; }) => _item.text).join('');
+              }
+              // 归类单位 (160 < x < 220)
+              const unitItems = row.filter((item: any) => item.x >= 160 && item.x < 220);
+              if (unitItems.length > 0) {
+                unit = unitItems.map((_item: { text: any; }) => _item.text).join('');
+              }
+              // 组成新的row，保持原有项但更新项目名称、规格型号和单位
+              let newRow: any[] = [];
+              // 只添加第一个项目名称项
+              let hasAddedProjectName = false;
+              let hasAddedSpecification = false;
+              let hasAddedUnit = false;
+              for (const item of row) {
+                if (item.x < 100) {
+                  if (!hasAddedProjectName) {
+                    newRow.push({ ...item, text: projectName });
+                    hasAddedProjectName = true;
+                  }
+                } else if (item.x >= 100 && item.x < 160) {
+                  if (!hasAddedSpecification) {
+                    newRow.push({ ...item, text: specification || "" });
+                    hasAddedSpecification = true;
+                  }
+                } else if (item.x >= 160 && item.x < 220) {
+                  if (!hasAddedUnit) {
+                    newRow.push({ ...item, text: unit || "" });
+                    hasAddedUnit = true;
+                  }
+                } else {
+                  newRow.push(item);
+                }
+              }
+              row = newRow;
+            }
+            
+            //如果下一行是换行，且不是商品明细结束，需要加到这一行
+            if(rows[j+1].length > 0 && rows[j+1].length < 5 && !(rows.indexOf("合") > -1 && rows.indexOf("计") > -1 && rows.indexOf("¥") > -1)){
+              console.log(`------------第${i}页第${j+2}行属于商品明细的换行，先添加到上一行然后置空`);
+              //遍历rows[j+1]和rows[j]，如果x坐标一样，则添加到rows[j]
+              rows[j+1].forEach((nextRowItem: any) => {
+                const matchingItem = row.find((currentRowItem: any) => 
+                  Math.abs(currentRowItem.x - nextRowItem.x) < 5
+                );
+                if (matchingItem) {
+                  matchingItem.text += nextRowItem.text;
+                } else {
+                  row.push(nextRowItem);
+                }
+              });
+              rows[j+1] = []; // Clear the next row after merging
+            }
+            //重新赋值，用"|"连接
+            rowText = row.map((item: any) => item.text).join('|');
             itemsText += rowText + '\n';
-            console.log(`第${i}页第${j+1}行属于商品明细: ${rowText}`);
+            console.log(`------------第${i}页第${j+1}行属于商品明细: ${rowText}`);
           } else {
             fullText += rowText + '\n';
           }
@@ -248,15 +313,15 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
       }
       
       console.log(`PDF处理完成，总文本项数量: ${allTextItems.length}`);
-      
+      //过滤掉text的空行
+      fullText = fullText.split('\n').filter(line => line.trim() !== '').join('\n');
       // 返回提取的文本和文本项
       return {
-        text: fullText.trim(),
-        textItems: allTextItems
+        text: fullText.trim()
       };
     } catch (error) {
       console.error('PDF提取失败:', error);
-      return {text: `[无法读取PDF内容: ${file.name}]`, textItems: []};
+      return {text: `[无法读取PDF内容: ${file.name}]`};
     }
   };
 
@@ -272,52 +337,40 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
         for (const invoice of project.invoices) {
           // 读取PDF发票内容
           console.log(`开始处理发票: ${invoice.name}`);
-          const {text, textItems} = await extractTextFromPDF(invoice);
-          
-          console.log(`发票 ${invoice.name} 提取完成，文本长度: ${text.length}, textItems数量: ${textItems.length}`);
-          
-          // 检查textItems的内容
-          if (textItems.length > 0) {
-            console.log(`发票 ${invoice.name} 的textItems示例:`, 
-              textItems.slice(0, 3).map(item => `"${item.text}"(x:${item.x},y:${item.y})`).join(', '));
-          } else {
-            console.warn(`警告: 发票 ${invoice.name} 的textItems为空!`);
-          }
+          const {text} = await extractTextFromPDF(invoice);
+
+          console.log(`发票 ${invoice.name} 提取完成，文本长度: ${text.length}`);
           
           // 提取关键详情
-          console.log(`开始从发票 ${invoice.name} 提取详细信息，传递 ${textItems.length} 个textItems`);
-          const details = extractInvoiceDetails(text, textItems);
+          console.log(`开始从发票 ${invoice.name} 提取详细信息`);
+          const details = extractInvoiceDetails(text);
           
-          console.log(`发票 ${invoice.name} 详情提取完成，items字段长度: ${details.items?.length || 0}, itemsTable字段长度: ${details.itemsTable?.length || 0}`);
+          console.log(`发票 ${invoice.name} 详情提取完成，items字段长度: ${details.items?.length || 0}`);
           
           // 保存完整信息，包括原始文本和提取的结构化信息
           const formattedContent = `## 提取的关键信息：\n` +
             `${details.invoiceNumber ? `发票号码: ${details.invoiceNumber}\n` : ''}` +
-            `${details.invoiceCode ? `发票代码: ${details.invoiceCode}\n` : ''}` +
             `${details.date ? `开票日期: ${details.date}\n` : ''}` +
             `${details.seller ? `销售方: ${details.seller}\n` : ''}` +
             `${details.sellerTaxID ? `销售方税号: ${details.sellerTaxID}\n` : ''}` +
-            `${details.sellerBank ? `销方开户银行: ${details.sellerBank}\n` : ''}` +
-            `${details.sellerBankAccount ? `银行账号: ${details.sellerBankAccount}\n` : ''}` +
+            `${details.sellerBank ? `销售方开户银行: ${details.sellerBank}\n` : ''}` +
+            `${details.sellerBankAccount ? `销售方银行账号: ${details.sellerBankAccount}\n` : ''}` +
             `${details.buyer ? `购买方: ${details.buyer}\n` : ''}` +
             `${details.buyerTaxID ? `购买方税号: ${details.buyerTaxID}\n` : ''}` +
-            `${details.amount ? `金额: ${details.amount}\n` : ''}` +
-            `${details.amountInWords ? `金额大写: ${details.amountInWords}\n` : ''}` +
+            `${details.buyerBank ? `购买方开户银行: ${details.buyerBank}\n` : ''}` +
+            `${details.buyerBankAccount ? `购买方银行账号: ${details.buyerBankAccount}\n` : ''}` +
             `${details.project ? `项目/工程: ${details.project}\n` : ''}` +
             `${details.projectAddress ? `工程地址: ${details.projectAddress}\n` : ''}` +
             `${details.issuer ? `开票人: ${details.issuer}\n` : ''}` +
-            `${details.itemsTable ? `\n## 商品明细表格:\n${details.itemsTable}\n` : ''}` +
-            `${details.items ? `\n## 商品原始信息:\n${details.items}\n` : ''}` +
             `\n## 原始文本（完整）：\n${text}`;
+
           
           processedInvoices.push({
             fileName: invoice.name,
             content: formattedContent,
             invoiceNumber: details.invoiceNumber,
             date: details.date,
-            amount: details.amount,
-            items: details.items,
-            itemsTable: details.itemsTable,
+            itemsTable: details.items,
             fullText: text,
             issuer: details.issuer,
             buyer: details.buyer,
@@ -377,8 +430,20 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
         买方: invoice.buyer || '未找到',
         卖方: invoice.seller || '未找到',
         项目地址: invoice.projectAddress || '未找到',
-        金额: invoice.amount || '未找到'
       })));
+
+      // 记录所有发票的商品名称，检查是否包含星号
+      for (const invoice of invoiceDataList) {
+        if (invoice.itemsTable && invoice.itemsTable.length > 0) {
+          console.log("发票商品明细项名称:", invoice.itemsTable.map(item => item.name));
+          
+          // 检查是否有名称中包含星号的商品
+          const itemsWithAsterisks = invoice.itemsTable.filter(item => item.name.includes('*'));
+          if (itemsWithAsterisks.length > 0) {
+            console.log("发现带星号的商品:", itemsWithAsterisks.map(item => item.name));
+          }
+        }
+      }
 
       // 按项目名称和买卖方信息分组处理发票
       const groupedInvoices: { [key: string]: LocalInvoiceData[] } = {};
@@ -450,17 +515,24 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           totalWithTaxInWords: convertToChineseAmount(contractData.totalWithTax || '0'),
           
           // 表格数据 - 确保支持遍历
-          items: contractData.invoiceItems?.map((item: InvoiceItem, index: number) => ({
-            index: index + 1,
-            name: item.name || '',
-            spec: item.spec || '',
-            unit: item.unit || '',
-            quantity: item.quantity || '',
-            price: item.price || '',
-            amount: item.amount || '',
-            taxRate: item.taxRate || '',
-            tax: item.tax || ''
-          })) || []
+          items: contractData.invoiceItems?.map((item: InvoiceItem, index: number) => {
+            // 记录原始商品名称
+            if (item.name && item.name.includes('*')) {
+              console.log('商品名称包含星号，添加到模板前:', item.name);
+            }
+            
+            return {
+              index: index + 1,
+              name: item.name || '',
+              spec: item.spec || '',
+              unit: item.unit || '',
+              quantity: item.quantity || '',
+              price: item.price || '',
+              amount: item.amount || '',
+              taxRate: item.taxRate || '',
+              tax: item.tax || ''
+            };
+          }) || []
         };
         
         try {
@@ -468,12 +540,32 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           const safeTemplateData = ensureTemplateFields(templateData);
           console.log("安全的模板数据:", safeTemplateData);
           
+          // 检查商品名称中是否有星号
+          if (safeTemplateData.items && Array.isArray(safeTemplateData.items)) {
+            const itemsWithAsterisks = safeTemplateData.items.filter((item: any) => 
+              item.name && item.name.includes('*')
+            );
+            
+            if (itemsWithAsterisks.length > 0) {
+              console.log("模板数据中带星号的商品:", itemsWithAsterisks.map((item: any) => item.name));
+            } else {
+              console.log("警告: 模板数据中没有带星号的商品，可能已被移除");
+            }
+          }
+          
           // 加载模板内容
           const buffer = templateContent;
           const zip = new PizZip(buffer);
           
           // 创建docxtemplater实例 (新API)
           const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: true,
+            delimiters: { start: '{', end: '}' }
+          });
+          
+          // 添加日志记录当前的docxtemplater配置
+          console.log("docxtemplater配置:", {
             paragraphLoop: true,
             linebreaks: true,
             delimiters: { start: '{', end: '}' }
@@ -722,7 +814,6 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
         买方: invoice.buyer || '未知',
         卖方: invoice.seller || '未知',
         项目: invoice.project || '未知',
-        金额: invoice.amount || '未知',
         有全文: !!fullText,
         全文长度: fullText.length,
         有内容: !!content,
@@ -778,62 +869,23 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
         if (invoice.itemsTable) {
           try {
             // 处理表格
-            const rows = invoice.itemsTable.trim().split('\n').filter(row => row.trim());
+            const items = invoice.itemsTable;
             
-            if (rows.length > 1) { // 至少有表头和一行数据
-              const headers = rows[0].split('\t');
-              const dataRows = rows.slice(1);
-              
-              // 找到相关列的索引
-              const nameIndex = headers.findIndex((h: string) => h.includes('名称'));
-              const specIndex = headers.findIndex((h: string) => h.includes('规格') || h.includes('型号'));
-              const unitIndex = headers.findIndex((h: string) => h.includes('单位'));
-              const quantityIndex = headers.findIndex((h: string) => h.includes('数量'));
-              const priceIndex = headers.findIndex((h: string) => h.includes('单价'));
-              const amountIndex = headers.findIndex((h: string) => h.includes('金额'));
-              const taxRateIndex = headers.findIndex((h: string) => h.includes('税率'));
-              const taxIndex = headers.findIndex((h: string) => h.includes('税额'));
-              
-              console.log('表格列映射:', {
-                名称列: nameIndex,
-                规格列: specIndex,
-                单位列: unitIndex,
-                数量列: quantityIndex,
-                单价列: priceIndex,
-                金额列: amountIndex,
-                税率列: taxRateIndex,
-                税额列: taxIndex
-              });
-              
-              // 解析每一行数据
-              for (const row of dataRows) {
-                const cells = row.split('\t');
-                
-                // 跳过汇总行 - 检查名称或者序号列
-                const name = nameIndex >= 0 ? cells[nameIndex] : '';
+            if (items && items.length > 0) {
+              // 直接使用items数组中的每个项目
+              for (const item of items) {
+                // 跳过汇总行 - 检查名称
                 const isHeaderOrSummary = 
-                  !name || 
-                  name.includes('合计') || 
-                  name.includes('价税合计') || 
-                  name.includes('不含税金额') ||
-                  name.includes('价税合');
+                  !item.name || 
+                  item.name.includes('合计') || 
+                  item.name.includes('价税合计') || 
+                  item.name.includes('不含税金额') ||
+                  item.name.includes('价税合');
                 
                 if (isHeaderOrSummary) {
-                  console.log(`跳过汇总行: ${row}`);
+                  console.log(`跳过汇总行: ${item.name}`);
                   continue;
                 }
-                
-                // 创建商品项
-                const item: InvoiceItem = {
-                  name: nameIndex >= 0 && cells[nameIndex] ? cells[nameIndex].trim() : '',
-                  spec: specIndex >= 0 && cells[specIndex] ? cells[specIndex].trim() : '',
-                  unit: unitIndex >= 0 && cells[unitIndex] ? cells[unitIndex].trim() : '',
-                  quantity: quantityIndex >= 0 && cells[quantityIndex] ? cells[quantityIndex].trim() : '',
-                  price: priceIndex >= 0 && cells[priceIndex] ? cells[priceIndex].trim() : '',
-                  amount: amountIndex >= 0 && cells[amountIndex] ? cells[amountIndex].trim() : '',
-                  taxRate: taxRateIndex >= 0 && cells[taxRateIndex] ? cells[taxRateIndex].trim() : '',
-                  tax: taxIndex >= 0 && cells[taxIndex] ? cells[taxIndex].trim() : ''
-                };
                 
                 // 计算项目金额和税额
                 if (item.amount) {
@@ -1054,6 +1106,9 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
     return (
       <div className="space-y-8">
         {invoiceDataList.map((invoice, index) => {
+          console.log(`Rendering invoice ${index}:`, invoice);
+          console.log(`Invoice items:`, invoice.itemsTable);
+          
           // 拆分内容为关键信息、商品明细和原始文本部分
           const parts = invoice.content?.split('## 原始文本（完整）：') || ['', ''];
           const keyInfo = parts[0] || '';
@@ -1063,12 +1118,22 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           const hasItemsTable = keyInfo.includes('## 商品明细表格:');
           const hasItems = keyInfo.includes('## 商品原始信息:');
           
+          console.log('Content parsing:', { 
+            hasItemsTable, 
+            hasItems, 
+            keyInfoLength: keyInfo.length 
+          });
+          
           // 提取基本信息（不包括商品明细）
           let basicInfo = keyInfo;
           let itemsTableSection = '';
           let itemsSection = '';
           
-          if (hasItemsTable) {
+          // 使用 itemsTable 直接创建表格，不依赖于文本解析
+          if (invoice.itemsTable && invoice.itemsTable.length > 0) {
+            console.log('Using direct itemsTable data for rendering');
+            itemsTableSection = 'DIRECT_ITEMS_TABLE';
+          } else if (hasItemsTable) {
             const itemsTableParts = keyInfo.split('## 商品明细表格:');
             basicInfo = itemsTableParts[0];
             
@@ -1090,17 +1155,58 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           const infoLines = basicInfo.replace('## 提取的关键信息：\n', '').split('\n')
             .filter(line => line.trim());
           
-          // 调试日志，检查是否有项目/工程信息
-          console.log("基本信息行:", infoLines);
-          
           // 确保项目/工程字段显示
           const hasProject = infoLines.some(line => line.includes('项目/工程:') || line.includes('项目/工程：'));
           
           // 处理商品明细表格
           const renderItemsTable = () => {
+            console.log('Rendering items table section:', {
+              itemsTableSection,
+              hasItemsTable: !!itemsTableSection,
+              directItems: itemsTableSection === 'DIRECT_ITEMS_TABLE'
+            });
+            
+            // 如果我们有直接的商品数据，使用它来渲染表格
+            if (itemsTableSection === 'DIRECT_ITEMS_TABLE' && invoice.itemsTable && invoice.itemsTable.length > 0) {
+              const items = invoice.itemsTable;
+              
+              return (
+                <div className="mt-6 bg-white rounded-lg shadow overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">名称</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">规格</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单位</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数量</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单价</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">金额</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">税率</th>
+                        <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">税额</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {items.map((item, itemIndex) => (
+                        <tr key={itemIndex} className={itemIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.name}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.spec}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.unit}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.quantity}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.price}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.amount}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.taxRate}</td>
+                          <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500">{item.tax}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            }
+            
             if (!itemsTableSection) return null;
             
-            // 解析表格数据
+            // 解析表格数据 (原有的文本解析逻辑)
             const rows = itemsTableSection.trim().split('\n')
               .filter(line => !line.includes('---'));
               

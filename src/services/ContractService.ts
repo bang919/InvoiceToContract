@@ -6,6 +6,14 @@ import { InvoiceData } from '../components/InvoiceExtractor';
 import mammoth from 'mammoth';
 import * as docx from 'docx';
 
+// 扩展InvoiceData接口以包含我们需要的字段
+interface ExtendedInvoiceData extends InvoiceData {
+  fullText?: string;
+  itemsTable?: any[] | string;
+  fileName?: string;
+  content?: string;
+}
+
 // 定义合同生成的数据结构
 export interface ContractData {
   buyerName: string;
@@ -26,7 +34,7 @@ export interface ContractData {
 }
 
 // 从发票中提取合同所需数据
-export function extractContractDataFromInvoices(invoices: InvoiceData[]): ContractData | null {
+export function extractContractDataFromInvoices(invoices: ExtendedInvoiceData[]): ContractData | null {
   if (!invoices || invoices.length === 0) {
     console.error('没有有效的发票数据');
     return null;
@@ -128,8 +136,13 @@ export function extractContractDataFromInvoices(invoices: InvoiceData[]): Contra
   
   // 处理每个发票的商品项
   invoices.forEach(invoice => {
+    console.log(`处理发票项目，itemsTable类型: ${typeof invoice.itemsTable}, 是数组: ${Array.isArray(invoice.itemsTable)}`);
+    
     if (invoice.itemsTable) {
-      const items = parseItemsTable(invoice.itemsTable);
+      // 直接使用itemsTable作为items数组
+      const items = Array.isArray(invoice.itemsTable) ? invoice.itemsTable : parseItemsTable(invoice.itemsTable as string);
+      console.log(`提取的商品项目: ${items.length}个`);
+      
       items.forEach(item => {
         // 添加到总商品列表
         allItems.push(item);
@@ -504,7 +517,7 @@ function convertToChineseAmount(amount: string | number): string {
 
 // 根据发票数据生成合同文件
 export async function generateContractFromInvoices(
-  invoices: InvoiceData[],
+  invoices: ExtendedInvoiceData[],
   templateBuffer: Buffer | ArrayBuffer,
   outputDir: string = 'output'
 ): Promise<string[]> {
@@ -555,8 +568,8 @@ export async function generateContractFromInvoices(
 }
 
 // 按项目和买卖方税号对发票分组
-function groupInvoicesByProject(invoices: InvoiceData[]): { [key: string]: InvoiceData[] } {
-  const groups: { [key: string]: InvoiceData[] } = {};
+function groupInvoicesByProject(invoices: ExtendedInvoiceData[]): { [key: string]: ExtendedInvoiceData[] } {
+  const groups: { [key: string]: ExtendedInvoiceData[] } = {};
   
   for (const invoice of invoices) {
     // 提取关键信息作为分组键
