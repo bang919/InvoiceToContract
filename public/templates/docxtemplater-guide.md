@@ -39,6 +39,7 @@
      - 税额: `{totalTax}`, `{taxInWords}`（中文大写）
      - 含税总金额: `{totalWithTax}`, `{totalWithTaxInWords}`（中文大写）
    - 日期编号: `{contractDate}`, `{contractNo}`
+   - 税率信息: `{firstItemTaxRate}`（第一个商品的税率）
    - 表格项目: 需在`{#items}...{/items}`循环中使用: 
      - `{index}`: 序号
      - `{name}`: 名称

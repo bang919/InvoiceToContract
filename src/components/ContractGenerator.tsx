@@ -478,61 +478,50 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           continue;
         }
         
-        // 准备模板数据 - 模拟后端处理逻辑
-        const templateData: Record<string, any> = {
-          // 基础信息
+        // 准备模板数据
+        const templateData = {
+          contractNo: `${contractData.projectName}-${new Date().toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).replace(/\//g, '')}`,
+          contractDate: new Date().toLocaleDateString('zh-CN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+          }).replace(/\//g, '年').replace(/\//g, '月'),
           buyerName: contractData.buyerName || '',
-          sellerName: contractData.sellerName || '',
           buyerTaxID: contractData.buyerTaxID || '',
+          sellerName: contractData.sellerName || '',
           sellerTaxID: contractData.sellerTaxID || '',
-          projectName: contractData.projectName || '',
-          projectAddress: contractData.projectAddress || '',
-          
-          // 银行信息
-          sellerBank: contractData.sellerBank || '',
-          sellerBankAccount: contractData.sellerBankAccount || '',
           buyerBank: contractData.buyerBank || '',
           buyerBankAccount: contractData.buyerBankAccount || '',
-          
-          // 日期和编号
-          contractDate: new Date().toLocaleDateString('zh-CN', {
-            year: 'numeric', 
-            month: '2-digit', 
-            day: '2-digit'
-          }).replace(/\//g, '年').replace(/\//g, '月') + '日',
-          contractNo: `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`,
-          
-          // 金额信息
-          totalAmount: contractData.totalAmount || '0.00',
+          sellerBank: contractData.sellerBank || '',
+          sellerBankAccount: contractData.sellerBankAccount || '',
+          projectName: contractData.projectName || '',
+          projectAddress: contractData.projectAddress || '',
+          totalAmount: contractData.totalAmount || '0',
+          totalTax: contractData.totalTax || '0',
+          totalWithTax: contractData.totalWithTax || '0',
           amountInWords: convertToChineseAmount(contractData.totalAmount || '0'),
-          
-          // 税额信息
-          totalTax: contractData.totalTax || '0.00',
           taxInWords: convertToChineseAmount(contractData.totalTax || '0'),
-          
-          // 含税总金额
-          totalWithTax: contractData.totalWithTax || '0.00',
           totalWithTaxInWords: convertToChineseAmount(contractData.totalWithTax || '0'),
+          firstItemTaxRate: (contractData.invoiceItems && contractData.invoiceItems[0]?.taxRate) || '3%',
           
           // 表格数据 - 确保支持遍历
-          items: contractData.invoiceItems?.map((item: InvoiceItem, index: number) => {
-            // 记录原始商品名称
-            if (item.name && item.name.includes('*')) {
-              console.log('商品名称包含星号，添加到模板前:', item.name);
-            }
-            
-            return {
-              index: index + 1,
-              name: item.name || '',
-              spec: item.spec || '',
-              unit: item.unit || '',
-              quantity: item.quantity || '',
-              price: item.price || '',
-              amount: item.amount || '',
-              taxRate: item.taxRate || '',
-              tax: item.tax || ''
-            };
-          }) || []
+          items: contractData.invoiceItems?.map((item: InvoiceItem, index: number) => ({
+            index: index + 1,
+            name: item.name || '',
+            spec: item.spec || '',
+            unit: item.unit || '',
+            quantity: item.quantity || '',
+            price: item.price || '',
+            amount: item.amount || '',
+            taxRate: item.taxRate || '',
+            tax: item.tax || '',
+            priceWithTax: (Number(item.price) * (1 + Number(item.taxRate.replace('%', '')) / 100)).toFixed(2),
+            amountWithTax: (Number(item.amount) * (1 + Number(item.taxRate.replace('%', '')) / 100)).toFixed(2),
+          })) || []
         };
         
         try {
@@ -1106,8 +1095,6 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
     return (
       <div className="space-y-8">
         {invoiceDataList.map((invoice, index) => {
-          console.log(`Rendering invoice ${index}:`, invoice);
-          console.log(`Invoice items:`, invoice.itemsTable);
           
           // 拆分内容为关键信息、商品明细和原始文本部分
           const parts = invoice.content?.split('## 原始文本（完整）：') || ['', ''];
@@ -1118,12 +1105,6 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           const hasItemsTable = keyInfo.includes('## 商品明细表格:');
           const hasItems = keyInfo.includes('## 商品原始信息:');
           
-          console.log('Content parsing:', { 
-            hasItemsTable, 
-            hasItems, 
-            keyInfoLength: keyInfo.length 
-          });
-          
           // 提取基本信息（不包括商品明细）
           let basicInfo = keyInfo;
           let itemsTableSection = '';
@@ -1131,7 +1112,6 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           
           // 使用 itemsTable 直接创建表格，不依赖于文本解析
           if (invoice.itemsTable && invoice.itemsTable.length > 0) {
-            console.log('Using direct itemsTable data for rendering');
             itemsTableSection = 'DIRECT_ITEMS_TABLE';
           } else if (hasItemsTable) {
             const itemsTableParts = keyInfo.split('## 商品明细表格:');
@@ -1266,7 +1246,7 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
                         const [key, value] = line.split(': ').map(s => s.trim());
                         return (
                           <tr key={i} className={i % 2 === 0 ? "bg-blue-100 bg-opacity-50" : ""}>
-                            <td className="py-2 px-3 font-semibold">{key}</td>
+                            <td className="py-2 px-3 font-semibold w-40">{key}</td>
                             <td className="py-2 px-3">{value || '未找到'}</td>
                           </tr>
                         );

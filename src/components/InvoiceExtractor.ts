@@ -54,6 +54,10 @@ export const extractInvoiceDetails = (text: string): InvoiceData => {
   const lines = text.split('\n').map(line => line.trim());
 
   lines.forEach(line => {
+    // 有些line可能空格不统一，统一下空格格式
+    line = line.replaceAll('统一社会信用代码 / 纳税人识别号', '统一社会信用代码/纳税人识别号')
+    .replaceAll('银行账号:', '银行账号 :').replaceAll('购方开户银行:', '购方开户银行 :').replaceAll('销方开户银行:', '销方开户银行 :');
+
     // ================= 基础信息提取 =================
     if (line.includes('发票号码：')) {
       invoice.invoiceNumber = line.split('发票号码：')[1].trim();
@@ -66,8 +70,9 @@ export const extractInvoiceDetails = (text: string): InvoiceData => {
       invoice.buyer = buyerPart.split('购 名称：')[1].trim();
       invoice.seller = sellerPart.trim();
     }
-    else if (line.includes('纳税人识别号：') && line.includes('统一社会信用代码 / 纳税人识别号：')) {
-      const texPartSplit = line.split('信 统一社会信用代码 / 纳税人识别号：');
+    else if (line.includes('统一社会信用代码/纳税人识别号：')) {
+      const texPartSplit = line.split('信 统一社会信用代码/纳税人识别号：');
+      console.log('texPartSplit 11111', texPartSplit);
       const buyerTaxPart = texPartSplit[1]
       const sellerTaxPart = texPartSplit[2]
       invoice.buyerTaxID = buyerTaxPart.trim();
@@ -112,7 +117,7 @@ export const extractInvoiceDetails = (text: string): InvoiceData => {
       const parts = line.split('|').map(p => p.trim());
       if (parts.length >= 7) {
         const item = {
-          name: parts[0],
+          name: parts[0].split('*').pop() || parts[0],
           spec: parts.length >= 8 ? parts[1] : '',
           unit: parts.length >= 8 ? parts[2] : parts[1],
           quantity: parts.length >= 8 ? parts[3] : parts[2],
