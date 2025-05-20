@@ -615,7 +615,7 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
       
       // 显示成功信息
       if (generatedFiles.length > 0) {
-        alert(`成功生成${generatedFiles.length}个合同文件`);
+        // alert(`成功生成${generatedFiles.length}个合同文件`);
       } else {
         alert('没有生成任何合同文件，请检查发票数据');
       }
@@ -948,89 +948,67 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
     return contractData;
   };
   
-  // 数字金额转中文大写
+  // 修复将数字转为中文金额的函数
   const convertToChineseAmount = (amount: string | number): string => {
-    // 确保输入为数字
-    const num = typeof amount === 'string' 
-      ? parseFloat(amount.replace(/[^\d.]/g, '')) 
-      : amount;
-
-    if (isNaN(num) || num === 0) {
-      return '零元整';
+    if (typeof amount === 'number') {
+      amount = amount.toString();
     }
-
-    const fraction = ['角', '分'];
-    const digit = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖'];
-    const unit = [
-      ['元', '万', '亿'],
-      ['', '拾', '佰', '仟']
-    ];
-
-    // 处理小数点之后的小数部分
-    let head = Math.floor(num);
-    let tail = '';
-    const numStr = num.toString();
-    const dotIndex = numStr.indexOf('.');
     
-    if (dotIndex !== -1) {
-      const cents = numStr.substring(dotIndex + 1);
-      if (cents.length > 0) {
-        // 处理小数，只取前两位
-        for (let i = 0; i < Math.min(2, cents.length); i++) {
-          if (cents[i] !== '0') {
-            tail += digit[parseInt(cents[i])] + fraction[i];
-          }
-        }
-      }
-    }
-
+    // 确保格式化为两位小数
+    const parts = amount.split('.');
+    let integerPart = parts[0];
+    const decimalPart = parts.length > 1 ? parts[1].padEnd(2, '0').substring(0, 2) : '00';
+    
+    const chineseNums = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖'];
+    const units = ['', '拾', '佰', '仟', '万', '拾', '佰', '仟', '亿', '拾', '佰', '仟', '兆'];
+    const decimalUnits = ['角', '分'];
+    
     // 处理整数部分
-    let headText = '';
-    let i = 0;
+    let chineseStr = '';
+    let hasZero = false;
+    let lastIndex = -1;
     
-    // 将整数部分转换为 4 位分组，从个位开始计算
-    while (head > 0) {
-      let p = '';
-      // 处理每组的 4 位数
-      for (let j = 0; j < 4; j++) {
-        // 当前位的值
-        const digit_value = head % 10;
-        // 减掉这一位
-        head = Math.floor(head / 10);
-        
-        // 处理每一位
-        if (digit_value !== 0) {
-          // 数字 + 单位（佰，拾等）
-          p = digit[digit_value] + unit[1][j] + p;
-        } else {
-          // 使用"零"占位，但不连续使用"零"
-          if (j === 0) {
-            // skip
-          } else if (p.charAt(0) !== '零') {
-            p = '零' + p;
-          }
+    for (let i = 0; i < integerPart.length; i++) {
+      const digit = parseInt(integerPart[i]);
+      const index = integerPart.length - 1 - i;
+      
+      // 处理"零"
+      if (digit === 0) {
+        // 避免连续输出"零"
+        if (!hasZero && i > 0) {
+          chineseStr += chineseNums[0];
+          hasZero = true;
         }
+        
+        // 添加"万"或"亿"单位
+        if (index === 4 || index === 8) {
+          chineseStr += units[index];
+          hasZero = false; // 重置零标记
+        }
+      } else {
+        // 非零数字
+        chineseStr += chineseNums[digit] + units[index];
+        hasZero = false;
       }
       
-      // 加上万亿等单位
-      if (p !== '') {
-        headText = p + unit[0][i] + headText;
-      }
-      
-      i++;
-    }
-
-    // 整数部分为 0 时特殊处理
-    if (headText === '') {
-      headText = '零元';
+      lastIndex = index;
     }
     
-    // 如果没有小数部分，增加"整"字
-    if (tail === '') {
-      tail = '整';
+    // 处理小数部分
+    let decimalStr = '';
+    for (let i = 0; i < 2; i++) {
+      const digit = parseInt(decimalPart[i]);
+      if (digit !== 0) {
+        decimalStr += chineseNums[digit] + decimalUnits[i];
+      }
     }
-
-    return headText + tail;
+    
+    // 组合最终结果
+    if (decimalStr.length > 0) {
+      return chineseStr + '元' + decimalStr;
+    } else {
+      return chineseStr + '元整';
+    }
   };
 
   // 在渲染模板之前确保所有必要的变量都存在
@@ -1055,7 +1033,7 @@ export default function ContractGenerator({ project }: ContractGeneratorProps) {
           result[field] = [];
           console.warn(`模板字段 "${field}" 不是数组，设为空数组`);
         } else {
-          result[field] = field.includes('Date') ? new Date().toLocaleDateString() : '未提供';
+          result[field] = field.includes('Date') ? new Date().toLocaleDateString() : '';
           console.warn(`模板字段 "${field}" 缺失，使用默认值`);
         }
       }
